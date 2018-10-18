@@ -1,0 +1,12 @@
+DerivedData/*
+*xcuserdata*
+*DS_Store*
+*.xcscmblueprint
+Pods/
+node_modules/*
+results/*
+
+
+3rdparty/ocunit2junit/
+
+3rdparty/tapkulib/tapkulibrary/
