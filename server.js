@@ -14,27 +14,33 @@ app.use(function(req, res, next) {
   next();
 });
 
-app.route('/builds').get((req, res) => {
-
+app.route('/builds/:client').get((req, res) => {
+		const client = req.params['client']
 		let builds = [];
-	    fs.readdir('screenshots/results', function (err, files) {
+	    fs.readdir(`screenshots/${client}/results`, function (err, files) {
 		    if (err) {
 		        return console.error(err);
 		    }
 
 		    files.forEach(function( file, index ) {
-		    	console.log('file:' + file);
 		    	if (file != '.DS_Store') {
-		    		console.log('start');
-					data = fs.readFileSync('screenshots/results/' + file + '/diffResult.json');
-					console.log(data);
+					data = fs.readFileSync(`screenshots/${client}/results/${file}/diffResult.json`);
 			   		builds.push(JSON.parse(data));
 		    	}
 			});
 
-		    console.log(builds);
-		    console.log(JSON.stringify(builds));
 
+			let results = builds.sort((a, b)=>{
+				if (a.buildNumber > b.buildNumber) {
+					return -1;
+				}
+				else if (a.buildNumber < b.buildNumber) {
+					return 1;
+				}
+				else {
+					return 0;
+				}
+			});
 
 		    res.send(JSON.stringify(builds));
 		});
@@ -69,10 +75,11 @@ app.route('/builds').get((req, res) => {
 	// });
 });
 
-app.route('/build/android/:id').get((req, res) => {
+app.route('/build/:client/:id').get((req, res) => {
 	const buildId = req.params['id']
+	const client = req.params['client']
 
-	fs.readFile('screenshots/results/' + buildId + '/diffResult.json', function read(err, data) {
+	fs.readFile(`screenshots//${client}/results/${buildId}/diffResult.json`, function read(err, data) {
 	    if (err) {
 	        throw err;
 	    }
@@ -81,17 +88,46 @@ app.route('/build/android/:id').get((req, res) => {
 	});
 });
 
-app.route('/build/android/:id/replace').post((req, res) => {
+app.route('/build/:client/:id/replace').post((req, res) => {
 	const buildId = req.params['id']
+	const client = req.params['client']
 
 	const screenshot = req.body.screenshot;
-	
-	console.log(req.params);
 
-	fs.copyFileSync(`screenshots/base/${screenshot}`, `screenshots/backup/${screenshot}`);
-	fs.copyFileSync('screenshots/results/' + buildId + '/Screenshots/new/' + screenshot, `screenshots/base/${screenshot}`);
+	fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, `screenshots/${client}/backup/${screenshot}`);
+	fs.copyFileSync(`screenshots/${client}/results/${buildId}/Screenshots/new/${screenshot}`, `screenshots/${client}/base/${screenshot}`);
 
-	res.send('{}');
+	let buildInfo = JSON.parse(fs.readFileSync(`screenshots/${client}/results/${buildId}/diffResult.json`));
+
+	if (!buildInfo.replaced) {
+		buildInfo.replaced = [];
+	}
+
+	if (!buildInfo.replaced.includes(screenshot)) {
+		buildInfo.replaced.push(screenshot);
+		fs.writeFileSync(`screenshots/${client}/results/${buildId}/diffResult.json`, JSON.stringify(buildInfo));
+	}
+
+	res.send(buildInfo);
+});
+
+app.route('/build/:client/:id/undoReplace').post((req, res) => {
+	const buildId = req.params['id']
+	const client = req.params['client']
+
+	const screenshot = req.body.screenshot;
+
+	fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, `screenshots/${client}/results/${buildId}/Screenshots/new/${screenshot}`);
+	fs.copyFileSync(`screenshots/${client}/backup/${screenshot}`, `screenshots/${client}/base/${screenshot}`);
+
+	let buildInfo = JSON.parse(fs.readFileSync(`screenshots/${client}/results/${buildId}/diffResult.json`));
+
+	buildInfo.replaced = buildInfo.replaced.filter(obj=> obj !== screenshot);
+
+	fs.writeFileSync(`screenshots/${client}/results/${buildId}/diffResult.json`, JSON.stringify(buildInfo));
+
+
+	res.send(buildInfo);
 });
 
 app.use(express.static('screenshots'));
