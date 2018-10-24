@@ -1,0 +1,2 @@
+#!/bin/bash
+scp -i ~/.ssh/tencent_20180605 server.js root@118.24.41.169:~/spond-test-results-backend/

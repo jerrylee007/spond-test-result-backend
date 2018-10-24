@@ -3,6 +3,11 @@ const express = require('express');
 const app = express();
 const fs = require('fs');
 
+var bodyParser = require('body-parser');
+
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: false }));
+
 app.use(function(req, res, next) {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
@@ -12,7 +17,7 @@ app.use(function(req, res, next) {
 app.route('/builds').get((req, res) => {
 
 		let builds = [];
-	    fs.readdir('results', function (err, files) {
+	    fs.readdir('screenshots/results', function (err, files) {
 		    if (err) {
 		        return console.error(err);
 		    }
@@ -21,7 +26,7 @@ app.route('/builds').get((req, res) => {
 		    	console.log('file:' + file);
 		    	if (file != '.DS_Store') {
 		    		console.log('start');
-					data = fs.readFileSync('results/' + file + '/diffResult.json');
+					data = fs.readFileSync('screenshots/results/' + file + '/diffResult.json');
 					console.log(data);
 			   		builds.push(JSON.parse(data));
 		    	}
@@ -67,7 +72,7 @@ app.route('/builds').get((req, res) => {
 app.route('/build/android/:id').get((req, res) => {
 	const buildId = req.params['id']
 
-	fs.readFile('results/' + buildId + '/diffResult.json', function read(err, data) {
+	fs.readFile('screenshots/results/' + buildId + '/diffResult.json', function read(err, data) {
 	    if (err) {
 	        throw err;
 	    }
@@ -76,7 +81,20 @@ app.route('/build/android/:id').get((req, res) => {
 	});
 });
 
-app.use(express.static('results'));
+app.route('/build/android/:id/replace').post((req, res) => {
+	const buildId = req.params['id']
+
+	const screenshot = req.body.screenshot;
+	
+	console.log(req.params);
+
+	fs.copyFileSync(`screenshots/base/${screenshot}`, `screenshots/backup/${screenshot}`);
+	fs.copyFileSync('screenshots/results/' + buildId + '/Screenshots/new/' + screenshot, `screenshots/base/${screenshot}`);
+
+	res.send('{}');
+});
+
+app.use(express.static('screenshots'));
 
 app.listen(8000, () => {
   console.log('Server started!');
