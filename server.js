@@ -4,7 +4,8 @@ const app = express();
 const fs = require('fs');
 
 const androidResultDir = '/var/lib/jenkins/jobs/Android-UITestOn8/builds'
-
+const webResultDir = '/var/lib/jenkins/jobs/WebClient-UITest/builds'
+const iosResultDir = '/var/lib/jenkins/jobs/WebClient-UITest/builds'
 
 var bodyParser = require('body-parser');
 
@@ -21,8 +22,10 @@ function getClientRootDir(client) {
 	let rootDir = undefined;
 	switch (client) {
 		case 'ios':
+			rootDir = iosResultDir;
 			break;
 		case 'web':
+			rootDir = webResultDir;
 			break;
 		case 'android':
 			rootDir = androidResultDir;
@@ -35,11 +38,54 @@ function getClientRootDir(client) {
 	return rootDir;
 }
 
+function getClientDiffJSONPath(client, build) {
+	let path = undefined;
+	switch (client) {
+		case 'ios':
+			path = `${iosResultDir}/${build}/archive/client3.1/testng/diffResult.json`;
+			break;
+		case 'web':
+			path = `${webResultDir}/${build}/archive/diffResult.json`;
+			break;
+		case 'android':
+			path = `${androidResultDir}/${build}/archive/client3.1/testng/diffResult.json`;
+			break;
+		default:
+			break;
+
+	}
+
+	return path;
+}
+
+function getClientResultScreenshotPath(client, buildId, screenshot) {
+	let path = undefined;
+	switch (client) {
+		case 'ios':
+			path = `${iosResultDir}/${buildId}/archive/client3.1/testng/Screenshots/new/${screenshot}`;
+			break;
+		case 'web':
+			path = `${webResultDir}/${buildId}/archive/out/${screenshot}`;
+			break;
+		case 'android':
+			path = `${androidResultDir}/${buildId}/archive/client3.1/testng/Screenshots/new/${screenshot}`;
+			break;
+		default:
+			break;
+
+	}
+
+	return path;
+}
+
+
 app.route('/builds/:client').get((req, res) => {
 		const client = req.params['client']
 		let builds = [];
 
 		let clientRootDir = getClientRootDir(client);
+
+		let baseFileCount = fs.readdirSync(`screenshots/${client}/base/`).length;
 
 		if (clientRootDir) {
 		    fs.readdir(clientRootDir, function (err, files) {
@@ -48,13 +94,14 @@ app.route('/builds/:client').get((req, res) => {
 			    }
 
 			    files.forEach(function(file, index) {
-			    	console.log(file);
 			    	let fstat = fs.lstatSync(`${clientRootDir}/${file}`);
 			    	if (file != '.DS_Store' && fstat.isDirectory()) {
-			    		let path = `${clientRootDir}/${file}/archive/client3.1/testng/diffResult.json`;
+			    		let path = getClientDiffJSONPath(client, file);
 			    		if (fs.existsSync(path)) {
 							data = fs.readFileSync(path);
-					   		builds.push(JSON.parse(data));
+							let buildJson = JSON.parse(data);
+							buildJson.baseFileCount = baseFileCount;
+					   		builds.push(buildJson);
 			    		}
 			    	}
 				});
@@ -114,9 +161,7 @@ app.route('/build/:client/:id').get((req, res) => {
 	const buildId = req.params['id']
 	const client = req.params['client']
 
-	let clientRootDir = getClientRootDir(client); 
-
-	fs.readFile(`${clientRootDir}/${buildId}/archive/client3.1/testng/diffResult.json`, function read(err, data) {
+	fs.readFile(getClientDiffJSONPath(client, buildId), function read(err, data) {
 	    if (err) {
 	        throw err;
 	    }
@@ -131,17 +176,15 @@ app.route('/build/:client/:id/replace').post((req, res) => {
 
 	const screenshot = req.body.screenshot;
 
-	let clientRootDir = getClientRootDir(client);
-
 	if (!fs.existsSync(`screenshots/${client}/backup/${buildId}`)) {
 		fs.mkdirSync(`screenshots/${client}/backup/${buildId}`);
 	}
 
 	fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, `screenshots/${client}/backup/${buildId}/${screenshot}`);
-	fs.copyFileSync(`${clientRootDir}/${buildId}/archive/client3.1/testng//Screenshots/new/${screenshot}`, `screenshots/${client}/base/${screenshot}`);
+	fs.copyFileSync(getClientResultScreenshotPath(client, buildId, screenshot), `screenshots/${client}/base/${screenshot}`);
 
 
-	let buildInfoPath = `${clientRootDir}/${buildId}/archive/client3.1/testng/diffResult.json`;
+	let buildInfoPath = getClientDiffJSONPath(client, buildId);
 	let buildInfo = JSON.parse(fs.readFileSync(buildInfoPath));
 
 	if (!buildInfo.replaced) {
@@ -162,12 +205,10 @@ app.route('/build/:client/:id/undoReplace').post((req, res) => {
 
 	const screenshot = req.body.screenshot;
 
-	let clientRootDir = getClientRootDir(client);
-
-	fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, `${clientRootDir}/${buildId}/archive/client3.1/testng//Screenshots/new/${screenshot}`);
+	fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, getClientResultScreenshotPath(client, buildId, screenshot));
 	fs.copyFileSync(`screenshots/${client}/backup/${buildId}/${screenshot}`, `screenshots/${client}/base/${screenshot}`);
 
-	let buildInfoPath = `${clientRootDir}/${buildId}/archive/client3.1/testng/diffResult.json`;
+	let buildInfoPath = getClientDiffJSONPath(client, buildId);
 	let buildInfo = JSON.parse(fs.readFileSync(buildInfoPath));
 
 	buildInfo.replaced = buildInfo.replaced.filter(obj=> obj !== screenshot);
@@ -180,6 +221,7 @@ app.route('/build/:client/:id/undoReplace').post((req, res) => {
 
 app.use('/screenshots', express.static('screenshots'));
 app.use('/android', express.static('/var/lib/jenkins/jobs/Android-UITestOn8/builds/'));
+app.use('/web', express.static('/var/lib/jenkins/jobs/WebClient-UITest/builds/'));
 
 
 app.listen(8000, () => {
