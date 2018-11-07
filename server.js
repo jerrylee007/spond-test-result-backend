@@ -78,6 +78,25 @@ function getClientResultScreenshotPath(client, buildId, screenshot) {
 	return path;
 }
 
+app.route('/:client/base').get((req, res) => {
+		const client = req.params['client']
+		let builds = [];
+
+		let clientRootDir = getClientRootDir(client);
+
+		let baseFiles = fs.readdirSync(`screenshots/${client}/base/`);
+		let baseFilesJson = [];
+
+	    baseFiles.forEach(function(file, index) {
+	    	if (file != '.DS_Store') {
+	    		baseFilesJson.push(file);
+	    	}
+		});
+
+		res.send(baseFilesJson); 
+});
+
+
 
 app.route('/builds/:client').get((req, res) => {
 		const client = req.params['client']
@@ -199,6 +218,32 @@ app.route('/build/:client/:id/replace').post((req, res) => {
 	res.send(buildInfo);
 });
 
+app.route('/build/:client/:id/removeBase').post((req, res) => {
+	const buildId = req.params['id']
+	const client = req.params['client']
+
+	const screenshot = req.body.screenshot;
+
+	if (fs.existsSync(`screenshots/${client}/base/${screenshot}`)) {
+		fs.unlinkSync(`screenshots/${client}/base/${screenshot}`);
+	}
+
+	let buildInfoPath = getClientDiffJSONPath(client, buildId);
+	let buildInfo = JSON.parse(fs.readFileSync(buildInfoPath));
+
+	if (buildInfo.replaced) {
+		buildInfo.replaced = buildInfo.replaced.filter(obj=> obj !== screenshot);
+	}
+
+	if (buildInfo.failedData) {
+		buildInfo.failedData = buildInfo.failedData.filter(obj=> obj !== screenshot);
+	}
+
+	fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo));
+
+	res.send(buildInfo);
+});
+
 app.route('/build/:client/:id/undoReplace').post((req, res) => {
 	const buildId = req.params['id']
 	const client = req.params['client']
@@ -211,7 +256,9 @@ app.route('/build/:client/:id/undoReplace').post((req, res) => {
 	let buildInfoPath = getClientDiffJSONPath(client, buildId);
 	let buildInfo = JSON.parse(fs.readFileSync(buildInfoPath));
 
-	buildInfo.replaced = buildInfo.replaced.filter(obj=> obj !== screenshot);
+	if (buildInfo.replaced) {
+		buildInfo.replaced = buildInfo.replaced.filter(obj=> obj !== screenshot);
+	}
 
 	fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo));
 
