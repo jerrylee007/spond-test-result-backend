@@ -48,7 +48,7 @@ function getClientDiffJSONPath(client, build) {
 			path = `${webResultDir}/${build}/archive/diffResult.json`;
 			break;
 		case 'android':
-			path = `${androidResultDir}/${build}/archive/client3.1/testng/diffResult.json`;
+			path = `${androidResultDir}/${build}/archive/diffResult.json`;
 			break;
 		default:
 			break;
@@ -68,7 +68,7 @@ function getClientResultScreenshotPath(client, buildId, screenshot) {
 			path = `${webResultDir}/${buildId}/archive/out/${screenshot}`;
 			break;
 		case 'android':
-			path = `${androidResultDir}/${buildId}/archive/client3.1/testng/Screenshots/new/${screenshot}`;
+			path = `${androidResultDir}/${buildId}/archive/new/${screenshot}`;
 			break;
 		default:
 			break;
