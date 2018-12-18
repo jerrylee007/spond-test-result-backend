@@ -5,7 +5,7 @@ const fs = require('fs');
 
 const androidResultDir = '/var/lib/jenkins/jobs/Android-UITestOn8/builds'
 const webResultDir = '/var/lib/jenkins/jobs/WebClient-UITest/builds'
-const iosResultDir = '/var/lib/jenkins/jobs/WebClient-UITest/builds'
+const iosResultDir = '/var/lib/jenkins/jobs/IOS-UITest/builds'
 
 var bodyParser = require('body-parser');
 
@@ -42,7 +42,7 @@ function getClientDiffJSONPath(client, build) {
 	let path = undefined;
 	switch (client) {
 		case 'ios':
-			path = `${iosResultDir}/${build}/archive/client3.1/testng/diffResult.json`;
+			path = `${iosResultDir}/${build}/archive/diffResult.json`;
 			break;
 		case 'web':
 			path = `${webResultDir}/${build}/archive/diffResult.json`;
@@ -62,7 +62,7 @@ function getClientResultScreenshotPath(client, buildId, screenshot) {
 	let path = undefined;
 	switch (client) {
 		case 'ios':
-			path = `${iosResultDir}/${buildId}/archive/client3.1/testng/Screenshots/new/${screenshot}`;
+			path = `${iosResultDir}/${buildId}/archive/new/${screenshot}`;
 			break;
 		case 'web':
 			path = `${webResultDir}/${buildId}/archive/out/${screenshot}`;
@@ -78,24 +78,31 @@ function getClientResultScreenshotPath(client, buildId, screenshot) {
 	return path;
 }
 
+function getBaseFiles(client, searchString) {
+	let clientRootDir = getClientRootDir(client);
+
+	let baseFiles = fs.readdirSync(`screenshots/${client}/base/`);
+	let baseFilesJson = [];
+
+    baseFiles.forEach(function(file, index) {
+    	if (file != '.DS_Store' && (!!!searchString || file.includes(searchString))) {
+    		baseFilesJson.push(file);
+    	}
+	});
+
+	return baseFilesJson; 
+}
+
 app.route('/:client/base').get((req, res) => {
-		const client = req.params['client']
-		let builds = [];
-
-		let clientRootDir = getClientRootDir(client);
-
-		let baseFiles = fs.readdirSync(`screenshots/${client}/base/`);
-		let baseFilesJson = [];
-
-	    baseFiles.forEach(function(file, index) {
-	    	if (file != '.DS_Store') {
-	    		baseFilesJson.push(file);
-	    	}
-		});
-
-		res.send(baseFilesJson); 
+	const client = req.params['client']
+	res.send(getBaseFiles(client, undefined)); 
 });
 
+app.route('/:client/base/:searchString').get((req, res) => {
+	const client = req.params['client']
+	const searchString = req.params['searchString']
+	res.send(getBaseFiles(client, searchString)); 
+});
 
 
 app.route('/builds/:client').get((req, res) => {
@@ -144,9 +151,6 @@ app.route('/builds/:client').get((req, res) => {
 		else {
 			res.send('{}');
 		}
-
-
-
 	    
 
 	// fs.readFile('results/builds.json', function read(err, data) {
@@ -269,7 +273,7 @@ app.route('/build/:client/:id/undoReplace').post((req, res) => {
 app.use('/screenshots', express.static('screenshots'));
 app.use('/android', express.static('/var/lib/jenkins/jobs/Android-UITestOn8/builds/'));
 app.use('/web', express.static('/var/lib/jenkins/jobs/WebClient-UITest/builds/'));
-
+app.use('/ios', express.static('/var/lib/jenkins/jobs/IOS-UITest/builds/'));
 
 app.listen(8000, () => {
   console.log('Server started!');
