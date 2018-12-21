@@ -4,11 +4,11 @@ const app = express();
 const fs = require('fs');
 
 const androidResultDir = '/var/lib/jenkins/jobs/Android-UITestOn8/builds'
-const webResultDir = '/var/lib/jenkins/jobs/WebClient-UITest/builds'
+const webResultDir = '/var/lib/jenkins/jobs/WebUITest/builds'
 const iosResultDir = '/var/lib/jenkins/jobs/IOS-UITest/builds'
 
 var bodyParser = require('body-parser');
-
+var multiparty = require('multiparty');
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 
@@ -17,6 +17,7 @@ app.use(function(req, res, next) {
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
   next();
 });
+
 
 function getClientRootDir(client) {
 	let rootDir = undefined;
@@ -65,7 +66,7 @@ function getClientResultScreenshotPath(client, buildId, screenshot) {
 			path = `${iosResultDir}/${buildId}/archive/new/${screenshot}`;
 			break;
 		case 'web':
-			path = `${webResultDir}/${buildId}/archive/out/${screenshot}`;
+			path = `${webResultDir}/${buildId}/archive/new/${screenshot}`;
 			break;
 		case 'android':
 			path = `${androidResultDir}/${buildId}/archive/new/${screenshot}`;
@@ -193,6 +194,29 @@ app.route('/build/:client/:id').get((req, res) => {
 	});
 });
 
+app.route('/build/:client/upload').post((req, res) => {
+	const client = req.params['client']
+
+	var form = new multiparty.Form();
+    form.parse(req, function(err, fields, files) {
+      console.log(files);
+	  if (fields.value == 'result') {
+	  	console.log(files.image);
+	  	console.log((files.image[0]).path);
+	  	console.log((files.image[0]).originalFilename);
+		fs.copyFileSync(files.image[0].path, `screenshots/${client}/result/${files.image[0].originalFilename}`);
+	  }
+	  else {
+	  	fs.copyFileSync(files.image[0].path, `screenshots/${client}/new/${files.image[0].originalFilename}`);
+	  }
+
+      res.send([]);
+    });
+
+	return;
+});
+
+
 app.route('/build/:client/:id/replace').post((req, res) => {
 	const buildId = req.params['id']
 	const client = req.params['client']
@@ -220,6 +244,18 @@ app.route('/build/:client/:id/replace').post((req, res) => {
 	}
 
 	res.send(buildInfo);
+});
+
+app.route('/build/:client/removeBase').post((req, res) => {
+	const client = req.params['client']
+
+	const screenshot = req.body.screenshot;
+
+	if (fs.existsSync(`screenshots/${client}/base/${screenshot}`)) {
+		fs.unlinkSync(`screenshots/${client}/base/${screenshot}`);
+	}
+
+	res.send([]);
 });
 
 app.route('/build/:client/:id/removeBase').post((req, res) => {
@@ -272,7 +308,7 @@ app.route('/build/:client/:id/undoReplace').post((req, res) => {
 
 app.use('/screenshots', express.static('screenshots'));
 app.use('/android', express.static('/var/lib/jenkins/jobs/Android-UITestOn8/builds/'));
-app.use('/web', express.static('/var/lib/jenkins/jobs/WebClient-UITest/builds/'));
+app.use('/web', express.static('/var/lib/jenkins/jobs/WebUITest/builds/'));
 app.use('/ios', express.static('/var/lib/jenkins/jobs/IOS-UITest/builds/'));
 
 app.listen(8000, () => {
