@@ -5,14 +5,14 @@ const fs = require('fs');
 
 const parser = require('xml2json');
 
-const androidDevResultDir = '/var/lib/jenkins/jobs/CombineAndroidUIDevTestsResults/builds'
-const androidStagingResultDir = '/var/lib/jenkins/jobs/CombineAndroidUIStagingTestsResults/builds'
+const androidDevResultDir = '/mnt/vdb/jenkins/jobs/CombineAndroidUIDevTestsResults/builds'
+const androidStagingResultDir = '/mnt/vdb/jenkins/jobs/CombineAndroidUIStagingTestsResults/builds'
 
-const webDevResultDir = '/var/lib/jenkins/jobs/WebUITest/builds'
-const webStagingResultDir = '/var/lib/jenkins/jobs/WebUITest/builds'
+const webDevResultDir = '/mnt/vdb/jenkins/jobs/CombineWebUIDevTestsResults/builds'
+const webStagingResultDir = '/mnt/vdb/jenkins/jobs/CombineWebUIStagingTestsResults/builds'
 
-const iosDevResultDir = '/var/lib/jenkins/jobs/CombineIosUIDevTestsResults/builds'
-const iosStagingResultDir = '/var/lib/jenkins/jobs/CombineIosUIStagingTestsResults/builds'
+const iosDevResultDir = '/mnt/vdb/jenkins/jobs/CombineIosUIDevTestsResults/builds'
+const iosStagingResultDir = '/mnt/vdb/jenkins/jobs/CombineIosUIStagingTestsResults/builds'
 
 const localBuildId = '99999'
 
@@ -207,6 +207,25 @@ function responseWithAllBuilds(client, res)  {
 						data = fs.readFileSync(path);
 						let buildJson = JSON.parse(data);
 						buildJson.baseFileCount = baseFileCount;
+
+						if (!!buildJson.replaced) {
+							buildJson.replacedScreenshotsCount = buildJson.replaced.length;
+						}
+						else {
+							buildJson.replacedScreenshotsCount = 0;
+						}
+
+						if (!!buildJson.failedData) {
+							buildJson.failedScreenshotsCount = buildJson.failedData.length;
+						}
+						else {
+							buildJson.failedScreenshotsCount = 0;
+						}
+
+						delete buildJson.data;
+						delete buildJson.failedData;
+						delete buildJson.replaced;
+
 				   		builds.push(buildJson);
 		    		}
 		    	}
@@ -230,6 +249,56 @@ function responseWithAllBuilds(client, res)  {
 	else {
 		res.send('[]');
 	}
+}
+
+function replaceScreenshot(client, buildId, screenshot) {
+	if (!fs.existsSync(`screenshots/${client}/backup/${buildId}`)) {
+		fs.mkdirSync(`screenshots/${client}/backup/${buildId}`);
+	}
+
+	if (fs.existsSync(`screenshots/${client}/base/${screenshot}`)) {
+		fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, `screenshots/${client}/backup/${buildId}/${screenshot}`);
+	}
+
+	fs.copyFileSync(getClientResultScreenshotPath(client, buildId, screenshot), `screenshots/${client}/base/${screenshot}`);
+
+
+	let buildInfoPath = getClientDiffJSONPath(client, buildId);
+	let buildInfo = JSON.parse(fs.readFileSync(buildInfoPath));
+
+	if (!buildInfo.replaced) {
+		buildInfo.replaced = []
+	}
+
+	if (!buildInfo.replaced.includes(screenshot)) {
+		buildInfo.replaced.push(screenshot);
+		fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo));
+	}
+
+	return buildInfo;
+}
+
+function passCaseByScreenshot(client, buildId, screenshot) {
+	let buildInfoPath = getClientDiffJSONPath(client, buildId);
+	let buildInfo = JSON.parse(fs.readFileSync(buildInfoPath));
+
+	var names = (screenshot.split(".")[0]).split("_");
+	var caseIds = [];
+
+    for (let name of names) {
+      if (name.startsWith('SPND')) {
+      	caseIds.push(name.replace('SPND', 'SPND-'));
+      }
+    }
+
+    var result = passOrFailCases(client, buildId, caseIds, true)
+
+    buildInfo.failedCount = result.failedCount
+    buildInfo.passedCount = result.passedCount
+
+	fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo));
+
+	return buildInfo;
 }
 
 
@@ -491,6 +560,31 @@ app.route('/build/:client/upload').post((req, res) => {
 	return;
 });
 
+app.route('/build/:client/:id/batchPassSimilar').post((req, res) => {
+	const buildId = req.params['id']
+	const client = req.params['client']
+
+	const screenshots = req.body.screenshots;
+
+	let buildInfoPath = getClientDiffJSONPath(client, buildId);
+	let buildInfo = {};
+
+	screenshots.forEach(function(screenshot, index) {
+		buildInfo = replaceScreenshot(client, buildId, screenshot);
+
+		if (buildInfo.similarData1) {
+			buildInfo.similarData1 = buildInfo.similarData1.filter(obj=> obj !== screenshot);
+		}
+
+		fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo))
+
+		buildInfo = passCaseByScreenshot(client, buildId, screenshot);
+	});
+
+	res.send(buildInfo);
+});
+
+
 app.route('/build/:client/:id/batchReplace').post((req, res) => {
 	const buildId = req.params['id']
 	const client = req.params['client']
@@ -511,7 +605,9 @@ app.route('/build/:client/:id/batchReplace').post((req, res) => {
 			fs.mkdirSync(`screenshots/${client}/backup/${buildId}`);
 		}
 
-		fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, `screenshots/${client}/backup/${buildId}/${screenshot}`);
+		if (fs.existsSync(`screenshots/${client}/base/${screenshot}`)) {
+			fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, `screenshots/${client}/backup/${buildId}/${screenshot}`);
+		}
 		fs.copyFileSync(getClientResultScreenshotPath(client, buildId, screenshot), `screenshots/${client}/base/${screenshot}`);
 
 		if (!buildInfo.replaced.includes(screenshot)) {
@@ -519,21 +615,9 @@ app.route('/build/:client/:id/batchReplace').post((req, res) => {
 		}
 	});
 
-	var names = (screenshots[0].split(".")[0]).split("_");
-	var caseIds = [];
+	fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo))
 
-    for (let name of names) {
-      if (name.startsWith('SPND')) {
-      	caseIds.push(name.replace('SPND', 'SPND-'));
-      }
-    }
-
-    var result = passOrFailCases(client, buildId, caseIds, true)
-
-    buildInfo.failedCount = result.failedCount
-    buildInfo.passedCount = result.passedCount
-
-	fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo));
+	buildInfo = passCaseByScreenshot(client, buildId, screenshots[0]);
 
 	res.send(buildInfo);
 });
@@ -545,25 +629,25 @@ app.route('/build/:client/:id/replace').post((req, res) => {
 
 	const screenshot = req.body.screenshot;
 
-	if (!fs.existsSync(`screenshots/${client}/backup/${buildId}`)) {
-		fs.mkdirSync(`screenshots/${client}/backup/${buildId}`);
-	}
+	let buildInfo =replaceScreenshot(client, buildId, screenshot);
 
-	fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, `screenshots/${client}/backup/${buildId}/${screenshot}`);
-	fs.copyFileSync(getClientResultScreenshotPath(client, buildId, screenshot), `screenshots/${client}/base/${screenshot}`);
+	res.send(buildInfo);
+});
 
+app.route('/build/:client/:id/removeSimilar').post((req, res) => {
+	const buildId = req.params['id']
+	const client = req.params['client']
+
+	const screenshot = req.body.screenshot;
 
 	let buildInfoPath = getClientDiffJSONPath(client, buildId);
 	let buildInfo = JSON.parse(fs.readFileSync(buildInfoPath));
 
-	if (!buildInfo.replaced) {
-		buildInfo.replaced = []
+	if (buildInfo.similarData1) {
+		buildInfo.similarData1 = buildInfo.similarData1.filter(obj=> obj !== screenshot);
 	}
 
-	if (!buildInfo.replaced.includes(screenshot)) {
-		buildInfo.replaced.push(screenshot);
-		fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo));
-	}
+   	fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo))
 
 	res.send(buildInfo);
 });
