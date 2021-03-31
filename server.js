@@ -14,6 +14,9 @@ const webStagingResultDir = '/mnt/vdb/jenkins/jobs/CombineWebUIStagingTestsResul
 const iosDevResultDir = '/mnt/vdb/jenkins/jobs/CombineIosUIDevTestsResults/builds'
 const iosStagingResultDir = '/mnt/vdb/jenkins/jobs/CombineIosUIStagingTestsResults/builds'
 
+const clubDevResultDir = '/mnt/vdb/jenkins/jobs/CombineClubUIDevTestsResults/builds'
+const clubStagingResultDir = '/mnt/vdb/jenkins/jobs/CombineClubUIStagingTestsResults/builds'
+
 const localBuildId = '99999'
 
 var bodyParser = require('body-parser');
@@ -48,6 +51,12 @@ function getClientRootDir(client) {
 		case 'android_staging':
 			rootDir = androidStagingResultDir;
 			break;
+		case 'club_dev':
+			rootDir = clubDevResultDir;
+			break;
+		case 'club_staging':
+			rootDir = clubStagingResultDir;
+			break;
 		default:
 			break;
 	}
@@ -72,6 +81,9 @@ function getClientDiffJSONPath(client, buildId) {
 			case 'android_dev':
 				path = `${androidDevResultDir}/${buildId}/archive/diffResult.json`;
 				break;
+			case 'club_dev':
+				path = `${clubDevResultDir}/${buildId}/archive/diffResult.json`;
+				break;
 			case 'ios_staging':
 				path = `${iosStagingResultDir}/${buildId}/archive/diffResult.json`;
 				break;
@@ -81,13 +93,14 @@ function getClientDiffJSONPath(client, buildId) {
 			case 'android_staging':
 				path = `${androidStagingResultDir}/${buildId}/archive/diffResult.json`;
 				break;
+			case 'club_staging':
+				path = `${clubStagingResultDir}/${buildId}/archive/diffResult.json`;
+				break;
 			default:
 				break;
 
 		}
 	}
-
-
 	return path;
 }
 
@@ -107,6 +120,9 @@ function getClientResultScreenshotPath(client, buildId, screenshot) {
 			case 'android_dev':
 				path = `${androidDevResultDir}/${buildId}/archive/new/${screenshot}`;
 				break;
+			case 'club_dev':
+				path = `${clubDevResultDir}/${buildId}/archive/new/${screenshot}`;
+				break;
 			case 'ios_staging':
 				path = `${iosStagingResultDir}/${buildId}/archive/new/${screenshot}`;
 				break;
@@ -115,6 +131,9 @@ function getClientResultScreenshotPath(client, buildId, screenshot) {
 				break;
 			case 'android_staging':
 				path = `${androidStagingResultDir}/${buildId}/archive/new/${screenshot}`;
+				break;
+			case 'club_staging':
+				path = `${clubStagingResultDir}/${buildId}/archive/new/${screenshot}`;
 				break;
 			default:
 				break;
@@ -179,10 +198,7 @@ function refreshCacheAndSendResponse(client, res) {
 			}
 		});
 
-	
-			res.send(JSON.stringify(builds));
-		
-		
+		res.send(JSON.stringify(builds));		
 	});
 }
 
@@ -216,7 +232,12 @@ function responseWithAllBuilds(client, res)  {
 						}
 
 						if (!!buildJson.failedData) {
-							buildJson.failedScreenshotsCount = buildJson.failedData.length;
+							if (Array.isArray(buildJson.failedData)) {
+								buildJson.failedScreenshotsCount = buildJson.failedData.length;
+							}
+							else {
+								buildJson.failedScreenshotsCount = (Object.keys(buildJson.failedData)).length;
+							}
 						}
 						else {
 							buildJson.failedScreenshotsCount = 0;
@@ -316,14 +337,12 @@ function emptyDirectory(buildPath) {
     fs.rmdirSync(buildPath);
 }
 
-function passOrFailCases(client, buildId, caseIds, passOrFail) {
-	var result = {
-		failedCount: 0,
-		passedCount: 0
-	};
-
+function getXml(client, buildId) {
 	var rootDir = getClientRootDir(client)
 	var xmlPath = `${rootDir}/${buildId}/archive/TestlinkResult.xml`
+	if (!fs.existsSync(xmlPath)) {
+		return undefined
+	}
 	var xml = fs.readFileSync(xmlPath)
 	var json = parser.toJson(xml, {    object: true,
 									    reversible: true,
@@ -333,7 +352,22 @@ function passOrFailCases(client, buildId, caseIds, passOrFail) {
 									    arrayNotation: false,
 									    alternateTextNode: false})
 
-	console.dir(caseIds, {depth: null, colors: true});
+	//console.dir(caseIds, {depth: null, colors: true});
+
+	return json;
+}
+
+
+function passOrFailCases(client, buildId, caseIds, passOrFail) {
+	var result = {
+		failedCount: 0,
+		passedCount: 0
+	};
+
+	var json = getXml(client, buildId);
+	if (!!!json) {
+		return result
+	}
 
     for (let testcase of json.results.testcase) {
       	if (caseIds.indexOf(testcase.external_id) > -1) {
@@ -354,7 +388,9 @@ function passOrFailCases(client, buildId, caseIds, passOrFail) {
       	}
     }
 
-	fs.writeFileSync(xmlPath, parser.toXml(JSON.stringify(json)))
+    var rootDir = getClientRootDir(client)
+
+	fs.writeFileSync(`${rootDir}/${buildId}/archive/TestlinkResult.xml`, parser.toXml(JSON.stringify(json)))
 
 	return result
 }
@@ -390,7 +426,13 @@ function removeBaseFile(client, screenshot) {
 					}
 
 					if (buildJson.failedData) {
-						buildJson.failedData = buildJson.failedData.filter(obj=> obj !== screenshot);
+						if (Array.isArray(buildJson.failedData)) {
+							buildJson.failedData = buildJson.failedData.filter(obj=> obj !== screenshot);
+						}
+						else if (buildJson.failedData[screenshot]) {
+							delete buildJson.failedData[screenshot];
+						}
+						
 					}
 
 					//console.dir(buildJson, {depth: null, colors: true});
@@ -409,43 +451,89 @@ app.route('/:client/base').get((req, res) => {
 
 app.route('/batchRemoveBase').post((req, res) => {
 	const caseId = req.body.caseId;
+	const platform = req.body.platform;
 	var removedFiles = [];
+
+	const shouldRemoveIOS = !!!platform || platform == 'ios'
+	const shouldRemoveAndroid = !!!platform || platform == 'android'
+	const shouldRemoveWeb = !!!platform || platform == 'web'
+	const shouldRemoveClub = platform == 'club'
 
 	console.log("case ID to be remove -> %s", caseId);
 
 	var formattedCaseId = 'SPND' + caseId + '_'
 
-	var iOSDevBases = getBaseFiles('ios_dev', formattedCaseId);
-	console.log("ios dev cases to be removed -> %s", iOSDevBases);
+	if (shouldRemoveIOS) {
+		var iOSDevBases = getBaseFiles('ios_dev', formattedCaseId);
+		console.log("ios dev cases to be removed -> %s", iOSDevBases);
 
-	iOSDevBases.forEach(function(file, index) {
-    	removeBaseFile('ios_dev', file);
-    	removedFiles.push('ios_dev:'+file);
-	});
+		iOSDevBases.forEach(function(file, index) {
+	    	removeBaseFile('ios_dev', file);
+	    	removedFiles.push('ios_dev:'+file);
+		});
 
-	var iOSStagingBases = getBaseFiles('ios_staging', formattedCaseId);
-	console.log("ios staging cases to be removed -> %s", iOSStagingBases);
+		var iOSStagingBases = getBaseFiles('ios_staging', formattedCaseId);
+		console.log("ios staging cases to be removed -> %s", iOSStagingBases);
 
-	iOSStagingBases.forEach(function(file, index) {
-    	removeBaseFile('ios_staging', file);
-    	removedFiles.push('ios_staging:'+file);
-	});
+		iOSStagingBases.forEach(function(file, index) {
+	    	removeBaseFile('ios_staging', file);
+	    	removedFiles.push('ios_staging:'+file);
+		});		
+	}
 
-	var androidDevBases = getBaseFiles('android_dev', formattedCaseId);
-	console.log("android dev cases to be removed -> %s", androidDevBases);
+	if (shouldRemoveAndroid) {
+		var androidDevBases = getBaseFiles('android_dev', formattedCaseId);
+		console.log("android dev cases to be removed -> %s", androidDevBases);
 
-	androidDevBases.forEach(function(file, index) {
-    	removeBaseFile('android_dev', file);
-    	removedFiles.push('android_dev:'+file);
-	});
+		androidDevBases.forEach(function(file, index) {
+	    	removeBaseFile('android_dev', file);
+	    	removedFiles.push('android_dev:'+file);
+		});
 
-	var androidStagingBases = getBaseFiles('android_staging', formattedCaseId);
-	console.log("android staging cases to be removed -> %s", androidStagingBases);
+		var androidStagingBases = getBaseFiles('android_staging', formattedCaseId);
+		console.log("android staging cases to be removed -> %s", androidStagingBases);
 
-	androidStagingBases.forEach(function(file, index) {
-    	removeBaseFile('android_staging', file);
-    	removedFiles.push('android_staging:'+file);
-	});
+		androidStagingBases.forEach(function(file, index) {
+	    	removeBaseFile('android_staging', file);
+	    	removedFiles.push('android_staging:'+file);
+		});
+	}
+
+	if (shouldRemoveWeb) {
+		var webDevBases = getBaseFiles('web_dev', formattedCaseId);
+		console.log("web dev cases to be removed -> %s", webDevBases);
+
+		webDevBases.forEach(function(file, index) {
+	    	removeBaseFile('web_dev', file);
+	    	removedFiles.push('web_dev:'+file);
+		});
+
+		var webStagingBases = getBaseFiles('web_staging', formattedCaseId);
+		console.log("web staging cases to be removed -> %s", webStagingBases);
+
+		webStagingBases.forEach(function(file, index) {
+	    	removeBaseFile('web_staging', file);
+	    	removedFiles.push('web_staging:'+file);
+		});
+	}
+
+	if (shouldRemoveClub) {
+		var clubDevBases = getBaseFiles('club_dev', formattedCaseId);
+		console.log("club dev cases to be removed -> %s", clubDevBases);
+
+		clubDevBases.forEach(function(file, index) {
+	    	removeBaseFile('club_dev', file);
+	    	removedFiles.push('club_dev:'+file);
+		});
+
+		var clubStagingBases = getBaseFiles('club_staging', formattedCaseId);
+		console.log("club staging cases to be removed -> %s", clubStagingBases);
+
+		clubStagingBases.forEach(function(file, index) {
+	    	removeBaseFile('cub_staging', file);
+	    	removedFiles.push('club_staging:'+file);
+		});
+	}
 
 	// var iOSBases = getBaseFiles('ios_dev', formattedCaseId);
 	// console.log("ios cases to be removed -> %s", iOSBases);
@@ -560,6 +648,29 @@ app.route('/build/:client/upload').post((req, res) => {
 	return;
 });
 
+app.route('/build/:client/:id/stringKeyMap').get((req, res) => {
+	const buildId = req.params['id']
+	const client = req.params['client']
+
+	var rootDir = getClientRootDir(client)
+	var keyMapPath = `${rootDir}/${buildId}/archive/UiKeyScreenMap.json`
+
+	fs.readFile(keyMapPath, function read(err, data) {
+	    if (err) {
+	        throw err;
+	    }
+
+	    res.send(JSON.parse(data));
+	});
+});
+
+app.route('/build/:client/:id/xml').get((req, res) => {
+	const buildId = req.params['id']
+	const client = req.params['client']
+
+	res.send(getXml(client, buildId));
+});
+
 app.route('/build/:client/:id/batchPassSimilar').post((req, res) => {
 	const buildId = req.params['id']
 	const client = req.params['client']
@@ -584,38 +695,40 @@ app.route('/build/:client/:id/batchPassSimilar').post((req, res) => {
 	res.send(buildInfo);
 });
 
-
 app.route('/build/:client/:id/batchReplace').post((req, res) => {
 	const buildId = req.params['id']
 	const client = req.params['client']
 
 	const screenshots = req.body.screenshots;
+	const onlyChangeXml = req.body.onlyChangeXml;
 
 	console.log('****' + screenshots);
 
-	let buildInfoPath = getClientDiffJSONPath(client, buildId);
-	let buildInfo = JSON.parse(fs.readFileSync(buildInfoPath));
+	if (!onlyChangeXml) {
+		let buildInfoPath = getClientDiffJSONPath(client, buildId);
+		let buildInfo = JSON.parse(fs.readFileSync(buildInfoPath));
 
-	if (!buildInfo.replaced) {
-		buildInfo.replaced = [];
+		if (!buildInfo.replaced) {
+			buildInfo.replaced = [];
+		}
+
+		screenshots.forEach(function(screenshot, index) {
+			if (!fs.existsSync(`screenshots/${client}/backup/${buildId}`)) {
+				fs.mkdirSync(`screenshots/${client}/backup/${buildId}`);
+			}
+
+			if (fs.existsSync(`screenshots/${client}/base/${screenshot}`)) {
+				fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, `screenshots/${client}/backup/${buildId}/${screenshot}`);
+			}
+			fs.copyFileSync(getClientResultScreenshotPath(client, buildId, screenshot), `screenshots/${client}/base/${screenshot}`);
+
+			if (!buildInfo.replaced.includes(screenshot)) {
+				buildInfo.replaced.push(screenshot);
+			}
+		});
+
+		fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo))
 	}
-
-	screenshots.forEach(function(screenshot, index) {
-		if (!fs.existsSync(`screenshots/${client}/backup/${buildId}`)) {
-			fs.mkdirSync(`screenshots/${client}/backup/${buildId}`);
-		}
-
-		if (fs.existsSync(`screenshots/${client}/base/${screenshot}`)) {
-			fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, `screenshots/${client}/backup/${buildId}/${screenshot}`);
-		}
-		fs.copyFileSync(getClientResultScreenshotPath(client, buildId, screenshot), `screenshots/${client}/base/${screenshot}`);
-
-		if (!buildInfo.replaced.includes(screenshot)) {
-			buildInfo.replaced.push(screenshot);
-		}
-	});
-
-	fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo))
 
 	buildInfo = passCaseByScreenshot(client, buildId, screenshots[0]);
 
@@ -691,15 +804,18 @@ app.route('/build/:client/:id/undoReplace').post((req, res) => {
 	const client = req.params['client']
 
 	const screenshot = req.body.screenshot;
-
-	fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, getClientResultScreenshotPath(client, buildId, screenshot));
-	fs.copyFileSync(`screenshots/${client}/backup/${buildId}/${screenshot}`, `screenshots/${client}/base/${screenshot}`);
+	const onlyChangeXml = req.body.onlyChangeXml;
 
 	let buildInfoPath = getClientDiffJSONPath(client, buildId);
 	let buildInfo = JSON.parse(fs.readFileSync(buildInfoPath));
 
-	if (buildInfo.replaced) {
-		buildInfo.replaced = buildInfo.replaced.filter(obj=> obj !== screenshot);
+	if (!onlyChangeXml) {
+		fs.copyFileSync(`screenshots/${client}/base/${screenshot}`, getClientResultScreenshotPath(client, buildId, screenshot));
+		fs.copyFileSync(`screenshots/${client}/backup/${buildId}/${screenshot}`, `screenshots/${client}/base/${screenshot}`);
+
+		if (buildInfo.replaced) {
+			buildInfo.replaced = buildInfo.replaced.filter(obj=> obj !== screenshot);
+		}
 	}
 
 	var names = (screenshot.split(".")[1]).split("_");
@@ -725,10 +841,12 @@ app.use('/screenshots', express.static('screenshots'));
 app.use('/android_dev', express.static(androidDevResultDir));
 app.use('/web_dev', express.static(webDevResultDir));
 app.use('/ios_dev', express.static(iosDevResultDir));
+app.use('/club_dev', express.static(clubDevResultDir));
 
 app.use('/android_staging', express.static(androidStagingResultDir));
 app.use('/web_staging', express.static(webStagingResultDir));
 app.use('/ios_staging', express.static(iosStagingResultDir));
+app.use('/club_staging', express.static(clubStagingResultDir));
 
 app.listen(8000, () => {
   console.log('Server started!');
