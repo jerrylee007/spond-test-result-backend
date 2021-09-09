@@ -299,7 +299,7 @@ function replaceScreenshot(client, buildId, screenshot) {
     return buildInfo;
 }
 
-function passCaseByScreenshot(client, buildId, screenshot) {
+function passCaseByScreenshot(client, buildId, screenshot, passOrFail) {
     let buildInfoPath = getClientDiffJSONPath(client, buildId);
     let buildInfo = JSON.parse(fs.readFileSync(buildInfoPath));
 
@@ -312,7 +312,7 @@ function passCaseByScreenshot(client, buildId, screenshot) {
       }
     }
 
-    var result = passOrFailCases(client, buildId, caseIds, true)
+    var result = passOrFailCases(client, buildId, caseIds, passOrFail)
 
     buildInfo.failedCount = result.failedCount
     buildInfo.passedCount = result.passedCount
@@ -393,6 +393,21 @@ function passOrFailCases(client, buildId, caseIds, passOrFail) {
     fs.writeFileSync(`${rootDir}/${buildId}/archive/TestlinkResult.xml`, parser.toXml(JSON.stringify(json)))
 
     return result
+}
+
+
+function passCaseIfAllReplaced(client, buildId, screenshot) {
+    let buildInfoPath = getClientDiffJSONPath(client, buildId);
+    let buildInfo = JSON.parse(fs.readFileSync(buildInfoPath));
+
+    var caseName = screenshot.split(".")[0];
+    console.log('replace case name: ' + caseName);
+    if (-1 == failedCasesWithoutReplaced.findIndex(obj=>obj.includes(caseName))) {
+        console.log('all case has been replaced');
+        buildInfo = passCaseByScreenshot(client, buildId, screenshot, true);
+    }
+
+    return buildInfo;
 }
 
 
@@ -687,9 +702,9 @@ app.route('/build/:client/:id/batchPassSimilar').post((req, res) => {
             buildInfo.similarData1 = buildInfo.similarData1.filter(obj=> obj !== screenshot);
         }
 
-        fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo))
+        fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo));
 
-        buildInfo = passCaseByScreenshot(client, buildId, screenshot);
+        buildInfo = passCaseIfAllReplaced(client, buildId, screenshot);
     });
 
     res.send(buildInfo);
@@ -730,7 +745,7 @@ app.route('/build/:client/:id/batchReplace').post((req, res) => {
         fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo))
     }
 
-    buildInfo = passCaseByScreenshot(client, buildId, screenshots[0]);
+    buildInfo = passCaseByScreenshot(client, buildId, screenshots[0], true);
 
     res.send(buildInfo);
 });
@@ -742,7 +757,13 @@ app.route('/build/:client/:id/replace').post((req, res) => {
 
     const screenshot = req.body.screenshot;
 
-    let buildInfo =replaceScreenshot(client, buildId, screenshot);
+    let buildInfo = replaceScreenshot(client, buildId, screenshot);
+
+
+    //Check if it is the last screenshot of the cases, if so, pass the result
+    const failedCasesWithoutReplaced = Object.keys(buildInfo.failedData).filter(obj=>!buildInfo.replaced.includes(obj));
+
+    buildInfo = passCaseIfAllReplaced(client, buildId, screenshot);
 
     res.send(buildInfo);
 });
@@ -818,21 +839,9 @@ app.route('/build/:client/:id/undoReplace').post((req, res) => {
         }
     }
 
-    var names = (screenshot.split(".")[1]).split("_");
-    var caseIds = [];
+    fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo));
 
-    for (let name of names) {
-      if (name.startsWith('SPND')) {
-        caseIds.push(name.replace('SPND', 'SPND-'));
-      }
-    }
-
-    var result = passOrFailCases(client, buildId, caseIds, false)
-
-    buildInfo.failedCount = result.failedCount
-    buildInfo.passedCount = result.passedCount
-
-    fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo))
+    buildInfo = passCaseByScreenshot(client, buildId, screenshot, false);
 
     res.send(buildInfo);
 });
