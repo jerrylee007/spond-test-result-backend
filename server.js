@@ -402,6 +402,8 @@ function passCaseIfAllReplaced(client, buildId, screenshot) {
 
     var caseName = screenshot.split(".")[0];
     console.log('replace case name: ' + caseName);
+    //Check if it is the last screenshot of the cases, if so, pass the result
+    const failedCasesWithoutReplaced = Object.keys(buildInfo.failedData).filter(obj=>!buildInfo.replaced.includes(obj));
     if (-1 == failedCasesWithoutReplaced.findIndex(obj=>obj.includes(caseName))) {
         console.log('all case has been replaced');
         buildInfo = passCaseByScreenshot(client, buildId, screenshot, true);
@@ -758,10 +760,6 @@ app.route('/build/:client/:id/replace').post((req, res) => {
     const screenshot = req.body.screenshot;
 
     let buildInfo = replaceScreenshot(client, buildId, screenshot);
-
-
-    //Check if it is the last screenshot of the cases, if so, pass the result
-    const failedCasesWithoutReplaced = Object.keys(buildInfo.failedData).filter(obj=>!buildInfo.replaced.includes(obj));
 
     buildInfo = passCaseIfAllReplaced(client, buildId, screenshot);
 
